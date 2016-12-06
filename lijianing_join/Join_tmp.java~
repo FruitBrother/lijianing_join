@@ -1,0 +1,44 @@
+//package jointest;
+import java.util.*;
+import java.text.SimpleDateFormat;
+//import org.apache.commons.logging.Log;
+//import org.apache.commons.logging.LogFactory;
+public class Join_tmp {
+	//private static final Log LOG = LogFactory.getLog(Join_tmp.class);
+	public static native String[] get_result(String[] ocol1,String[] ocol2,String[] ucol1,String[] ucol2,int o_size,int u_size);
+
+	public static String[] trans_data(ArrayList<String> o_data,ArrayList<String> u_data,int o_size,int u_size)
+	{
+		String[] order_col1=new String[o_size];
+		String[] order_col2=new String[o_size];
+
+		String[] user_col1=new String[u_size];
+		String[] user_col2=new String[u_size];
+		
+		for(int i=0;i<o_size;i++)
+		{
+			String [] tmp=o_data.get(i).split("[|]");
+			order_col1[i]=tmp[1];
+			order_col2[i]=tmp[3];
+
+		}
+		for(int j=0;j<u_size;j++)
+		{
+			String [] tmp1=u_data.get(j).split("[|]");
+			user_col1[j]=tmp1[1];
+			user_col2[j]=tmp1[3];
+			
+		}
+		
+		String[] result = get_result(order_col1,order_col2, user_col1, user_col2, o_size,u_size);
+
+
+
+		
+		return result;
+	}
+	static{
+		
+		System.load("/home/dblab/lijianing/lijianing_join/lijianing_join/libjnidll.so");
+	}
+}

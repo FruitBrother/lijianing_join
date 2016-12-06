@@ -1,0 +1,218 @@
+//package jointest;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.text.SimpleDateFormat;
+import java.util.*;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.InputSplit;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.input.FileSplit;
+import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
+
+public class Join {
+	public static final Log log = LogFactory.getLog(Join.class);
+	public static class JoinMap1 extends Mapper<LongWritable, Text, Text, IntWritable> {
+
+		private final IntWritable one = new IntWritable(1);
+		private final IntWritable two = new IntWritable(2);
+
+		public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+			String line = value.toString();
+			String[] fields = line.split("[|]");
+			InputSplit inputSplit = (InputSplit) context.getInputSplit();
+			String filename = ((FileSplit) inputSplit).getPath().getName();
+			// Map<String,Integer> user = new HashMap<String,Integer>();
+			// Map<String,Integer> order = new HashMap<String,Integer>();
+			if (filename.equals("order.txt")) { // 来自order表
+
+				context.write(new Text(fields[0]), two);
+
+			} else {// 来自user表
+
+				context.write(new Text(fields[0]), one);
+
+			}
+			/*
+			 * Iterator<String> itUser = user.keySet().iterator();
+			 * while(itUser.hasNext()) { context.write(new Text(itUser.next()),
+			 * one); } Iterator<String> itOrder = order.keySet().iterator();
+			 * while(itOrder.hasNext()) { context.write(new
+			 * Text(itOrder.next()), two); }
+			 */
+		}
+	}
+
+	public static class JoinReduce1 extends Reducer<Text, IntWritable, Text, NullWritable> {
+
+		public void reduce(Text key, Iterable<IntWritable> values, Context context)
+				throws IOException, InterruptedException {
+
+			Map<String, Integer> user = new HashMap<String, Integer>();
+			Map<String, Integer> order = new HashMap<String, Integer>();
+			for (IntWritable val : values) {
+				if (val.get() == 1) {
+					if (!user.containsKey(key.toString()))
+						user.put(key.toString(), 1);
+				} else {
+					if (!order.containsKey(key.toString()))
+						order.put(key.toString(), 1);
+				}
+			}
+
+			Iterator<String> itUser = user.keySet().iterator();
+			String tmp;
+			while (itUser.hasNext()) {
+				tmp = itUser.next();
+				if (order.containsKey(tmp)) {
+					context.write(new Text(tmp), null);
+				}
+			}
+		}
+	}
+
+	public static class JoinMap2 extends Mapper<LongWritable, Text, Text, Text> {
+
+		// private final IntWritable one = new IntWritable(1);
+		// private final IntWritable two = new IntWritable(2);
+
+		Map<String, Integer> stat = new HashMap<String, Integer>();
+
+		protected void setup(Context context) throws IOException {
+
+			Path hdfs = new Path("hdfs://master-hadoop:9000/join/output/");
+			FileSystem in = FileSystem.get(context.getConfiguration());
+			FileStatus[] status = in.listStatus(hdfs);
+			String str;
+			for (int i = 0; i < status.length; i++) {
+
+				FSDataInputStream inputStream = in.open(status[i].getPath());
+				BufferedReader input = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
+				while ((str = input.readLine()) != null) {
+
+					if (!stat.containsKey(str)) {
+						stat.put(str, 1);
+					}
+				}
+				inputStream.close();
+				input.close();
+			}
+
+		}
+
+		public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+			String line = value.toString();
+			String[] fields = line.split("[|]");
+
+		/*	System.out.println("map_start");
+			Iterator<String> itUser = stat.keySet().iterator();
+			while (itUser.hasNext()) {
+				System.out.println(itUser.next());
+
+			}*/
+			int k=Integer.parseInt(fields[0]);
+			int ke=k/100;
+			String keystr = ke+"";
+			if (stat.containsKey(fields[0])) {
+				InputSplit inputSplit = (InputSplit) context.getInputSplit();
+				String filename = ((FileSplit) inputSplit).getPath().getName();
+				if (filename.equals("order.txt")) { // 来自order表
+
+					context.write(new Text(keystr), new Text("ORDER"+"|" + line));
+
+				} else {// 来自user表
+
+					context.write(new Text(keystr), new Text("USER"+"|" + line));
+
+				}
+			}
+			//System.out.println("map_end");
+		}
+	}
+
+	public static class JoinReduce2 extends Reducer<Text, Text, Text, NullWritable> {
+
+		public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
+			ArrayList<String> o_data=new ArrayList<String>();
+			ArrayList<String> u_data=new ArrayList<String>();
+			for (Text str : values) {
+				
+				if(str.toString().substring(0, 5) .equals("ORDER"))
+					o_data.add(str.toString());
+				else
+					u_data.add(str.toString());
+				
+			}
+			
+			String[] result=Join_tmp.trans_data(o_data,u_data,o_data.size(),u_data.size());
+			
+			for(int i=0;i<result.length;i++)
+				context.write(new Text(result[i]), null);
+		}
+	}
+
+	public static void main(String[] args) throws Exception {
+		log.info(new SimpleDateFormat("yyyyMMddHHmmssSSS") .format(new Date()) );
+		Configuration conf = new Configuration();
+		Job job1 = new Job(conf);
+		job1.setJarByClass(Join.class);
+		job1.setJobName("Join");
+
+		job1.setOutputKeyClass(Text.class);
+		job1.setOutputValueClass(IntWritable.class);
+
+		job1.setMapperClass(JoinMap1.class);
+		job1.setReducerClass(JoinReduce1.class);
+
+		job1.setInputFormatClass(TextInputFormat.class);
+		job1.setOutputFormatClass(TextOutputFormat.class);
+
+		// FileInputFormat.addInputPath(job, new
+		// Path("hdfs://master-hadoop:9000/usr"));
+		FileInputFormat.addInputPath(job1, new Path("hdfs://master-hadoop:9000/join/order.txt"));
+		FileInputFormat.addInputPath(job1, new Path("hdfs://master-hadoop:9000/join/user.txt"));
+		FileOutputFormat.setOutputPath(job1, new Path("hdfs://master-hadoop:9000/join/output"));
+
+		if (job1.waitForCompletion(true)) {
+			//System.out.println(new SimpleDateFormat("yyyyMMddHHmmssSSS") .format(new Date() ));			
+			Job job2 = new Job(conf);
+			job2.setJarByClass(Join.class);
+			job2.setJobName("Join");
+
+			job2.setOutputKeyClass(Text.class);
+			job2.setOutputValueClass(Text.class);
+
+			job2.setMapperClass(JoinMap2.class);
+			job2.setReducerClass(JoinReduce2.class);
+
+			job2.setInputFormatClass(TextInputFormat.class);
+			job2.setOutputFormatClass(TextOutputFormat.class);
+
+			// FileInputFormat.addInputPath(job, new
+			// Path("hdfs://master-hadoop:9000/usr"));
+			FileInputFormat.addInputPath(job2, new Path("hdfs://master-hadoop:9000/join/order.txt"));
+			FileInputFormat.addInputPath(job2, new Path("hdfs://master-hadoop:9000/join/user.txt"));
+			FileOutputFormat.setOutputPath(job2, new Path("hdfs://master-hadoop:9000/join/result"));
+			job2.waitForCompletion(true);
+			//System.out.println(new SimpleDateFormat("yyyyMMddHHmmssSSS") .format(new Date() ));
+			log.info(new SimpleDateFormat("yyyyMMddHHmmssSSS") .format(new Date()) );
+		}
+	}
+}
